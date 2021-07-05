@@ -86,6 +86,33 @@ macro_rules! state_packets {
         )+
         }
 
+        impl PacketType for Packet {
+
+            fn packet_id(&self, version: i32) -> i32 {
+                match self {
+                    $(
+                        $(
+                            $(
+                                Self::$name(v) => PacketType::packet_id(v, version),
+                            )*
+                        )+
+                    )+
+                }
+            }
+
+            fn write<W: io::Write>(&self, buf: &mut W) -> Result<(), Error> {
+                match self {
+                    $(
+                        $(
+                            $(
+                                Self::$name(v) => PacketType::write(v, buf),
+                            )*
+                        )+
+                    )+
+                }
+            }
+        }
+
         $(
         pub mod $state {
 
