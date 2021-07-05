@@ -1607,6 +1607,16 @@ state_packets!(
                 field flags: u8 =,
                 field teleport_id: VarInt =,
             }
+            packet TeleportPlayer_WithConfirmDismount {
+                field x: f64 =,
+                field y: f64 =,
+                field z: f64 =,
+                field yaw: f32 =,
+                field pitch: f32 =,
+                field flags: u8 =,
+                field teleport_id: VarInt =,
+                field dismount: bool =,
+            }
             packet TeleportPlayer_NoConfirm {
                 field x: f64 =,
                 field y: f64 =,
