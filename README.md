@@ -1,7 +1,7 @@
 # Stevenarella
 [![Build Status](https://img.shields.io/endpoint.svg?url=https%3A%2F%2Factions-badge.atrox.dev%2Ficeiix%2Fstevenarella%2Fbadge%3Fref%3Dmaster&style=plastic)](https://actions-badge.atrox.dev/iceiix/stevenarella/goto?ref=master)
 
-Multi-protocol Minecraft-compatible client written in Rust
+Multi-protocol Minecraft-compatible client written in Rust.
 
 Don't expect it to go anywhere, just doing this for fun.
 
@@ -13,16 +13,21 @@ Don't expect it to go anywhere, just doing this for fun.
 
 In action: http://gfycat.com/NeedyElaborateGypsymoth
 
-## Community chatroom
+## Community
 
-We have a chatroom on [EsperNet](https://esper.net): `irc.esper.net` server, `#stevenarella` channel.
+IRC channel: `#stevenarella` on [irc.esper.net](https://esper.net).
 
-Join with your favorite IRC client.
+Discussion forum: [https://github.com/iceiix/stevenarella/discussions](https://github.com/iceiix/stevenarella/discussions).
+
 
 ## Protocol support
 
 | Game version | Protocol version | Supported? |
 | ------ | --- | --- |
+| 1.16.5 | 754 | ✓ |
+| 1.16.4 | 754 | ✓ |
+| 1.16.3 | 753 | ✓ |
+| 1.16.2 | 751 | ✓ |
 | 1.16.1 | 736 | ✓ |
 | 1.16 | 735 | ✓ |
 | 1.15.2 | 578 | ✓ |
@@ -50,7 +55,7 @@ development is not in lock-step with the server version. The level of
 support varies, but the goal is to support major versions from 1.7.10
 up to the current latest major version. Occasionally, snapshots are also supported.
 
-Forge servers are currently supported on 1.7.10 - 1.12.2.
+Forge servers are supported on 1.7.10 - 1.12.2 (FML) and 1.13.2 - 1.16.5 (FML2).
 
 Support for older protocols will _not_ be dropped as newer protocols are added.
 
@@ -60,9 +65,23 @@ Windows, Ubuntu Linux, and macOS users can download pre-compiled builds
 from [GitHub Actions](https://actions-badge.atrox.dev/iceiix/stevenarella/goto?ref=master).
 (Click the artifacts drop-down and select your platform.)
 
-## Building
+## Dependencies
 
-Requires Rust stable version 1.44.1 or newer to build.
+Requires Rust stable version 1.53.0 or newer.
+
+**Debian/Ubuntu**
+
+```bash
+sudo apt-get install libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxcb-composite0-dev
+```
+
+**Alpine Linux**
+
+```bash
+sudo apk add openssl-dev xcb-util-dev
+```
+
+## Building
 
 Compile and run:
 ```bash

@@ -25,7 +25,8 @@ use crate::types::Gamemode;
 use crate::world;
 use crate::world::block;
 use cgmath::prelude::*;
-use log::{debug, error, warn};
+use instant::Instant;
+use log::{debug, error, info, warn};
 use rand::{self, Rng};
 use std::collections::HashMap;
 use std::hash::BuildHasherDefault;
@@ -74,11 +75,13 @@ pub struct Server {
 
     tick_timer: f64,
     entity_tick_timer: f64,
+    pub received_chat_at: Option<Instant>,
 
     sun_model: Option<sun::SunModel>,
     target_info: target::Info,
 }
 
+#[derive(Debug)]
 pub struct PlayerInfo {
     name: String,
     uuid: protocol::UUID,
@@ -109,14 +112,17 @@ impl Server {
         address: &str,
         protocol_version: i32,
         forge_mods: Vec<forge::ForgeMod>,
+        fml_network_version: Option<i64>,
     ) -> Result<Server, protocol::Error> {
         let mut conn = protocol::Conn::new(address, protocol_version)?;
 
-        let tag = if !forge_mods.is_empty() {
-            "\0FML\0"
-        } else {
-            ""
+        let tag = match fml_network_version {
+            Some(1) => "\0FML\0",
+            Some(2) => "\0FML2\0",
+            None => "",
+            _ => panic!("unsupported FML network version: {:?}", fml_network_version),
         };
+
         let host = conn.host.clone() + tag;
         let port = conn.port;
         conn.write_packet(protocol::packet::handshake::serverbound::Handshake {
@@ -166,7 +172,6 @@ impl Server {
                         Some(rx),
                     ));
                 }
-                // TODO: avoid duplication
                 protocol::packet::Packet::LoginSuccess_UUID(val) => {
                     warn!("Server is running in offline mode");
                     debug!("Login: {} {:?}", val.username, val.uuid);
@@ -187,12 +192,11 @@ impl Server {
                 protocol::packet::Packet::LoginDisconnect(val) => {
                     return Err(protocol::Error::Disconnect(val.reason))
                 }
-                val => return Err(protocol::Error::Err(format!("Wrong packet: {:?}", val))),
+                val => return Err(protocol::Error::Err(format!("Wrong packet 1: {:?}", val))),
             };
         }
 
         let mut shared = [0; 16];
-        // TODO: is this cryptographically secure enough?
         rand::thread_rng().fill(&mut shared);
 
         let shared_e = rsa_public_encrypt_pkcs1::encrypt(&public_key, &shared).unwrap();
@@ -224,6 +228,7 @@ impl Server {
         write.enable_encyption(&shared, false);
 
         let uuid;
+        let compression_threshold = read.compression_threshold;
         loop {
             match read.read_packet()? {
                 protocol::packet::Packet::SetInitialCompression(val) => {
@@ -247,7 +252,73 @@ impl Server {
                 protocol::packet::Packet::LoginDisconnect(val) => {
                     return Err(protocol::Error::Disconnect(val.reason))
                 }
-                val => return Err(protocol::Error::Err(format!("Wrong packet: {:?}", val))),
+                protocol::packet::Packet::LoginPluginRequest(req) => {
+                    match req.channel.as_ref() {
+                        "fml:loginwrapper" => {
+                            let mut cursor = std::io::Cursor::new(req.data);
+                            let channel: String = protocol::Serializable::read_from(&mut cursor)?;
+
+                            let (id, mut data) = protocol::Conn::read_raw_packet_from(
+                                &mut cursor,
+                                compression_threshold,
+                            )?;
+
+                            match channel.as_ref() {
+                                "fml:handshake" => {
+                                    let packet =
+                                        forge::fml2::FmlHandshake::packet_by_id(id, &mut data)?;
+                                    use forge::fml2::FmlHandshake::*;
+                                    match packet {
+                                        ModList {
+                                            mod_names,
+                                            channels,
+                                            registries,
+                                        } => {
+                                            info!("ModList mod_names={:?} channels={:?} registries={:?}", mod_names, channels, registries);
+                                            write.write_fml2_handshake_plugin_message(
+                                                req.message_id,
+                                                Some(&ModListReply {
+                                                    mod_names,
+                                                    channels,
+                                                    registries,
+                                                }),
+                                            )?;
+                                        }
+                                        ServerRegistry {
+                                            name,
+                                            snapshot_present: _,
+                                            snapshot: _,
+                                        } => {
+                                            info!("ServerRegistry {:?}", name);
+                                            write.write_fml2_handshake_plugin_message(
+                                                req.message_id,
+                                                Some(&Acknowledgement),
+                                            )?;
+                                        }
+                                        ConfigurationData { filename, contents } => {
+                                            info!(
+                                                "ConfigurationData filename={:?} contents={}",
+                                                filename,
+                                                String::from_utf8_lossy(&contents)
+                                            );
+                                            write.write_fml2_handshake_plugin_message(
+                                                req.message_id,
+                                                Some(&Acknowledgement),
+                                            )?;
+                                        }
+                                        _ => unimplemented!(),
+                                    }
+                                }
+                                _ => panic!(
+                                    "unknown LoginPluginRequest fml:loginwrapper channel: {:?}",
+                                    channel
+                                ),
+                            }
+                        }
+                        _ => panic!("unsupported LoginPluginRequest channel: {:?}", req.channel),
+                    }
+                }
+                val => return Err(protocol::Error::Err(format!("Wrong packet 2: {:?}", val))),
             }
         }
 
@@ -421,6 +492,7 @@ impl Server {
 
             tick_timer: 0.0,
             entity_tick_timer: 0.0,
+            received_chat_at: None,
             sun_model: None,
 
             target_info: target::Info::new(),
@@ -509,6 +581,7 @@ impl Server {
                         self pck {
                             PluginMessageClientbound_i16 => on_plugin_message_clientbound_i16,
                             PluginMessageClientbound => on_plugin_message_clientbound_1,
+                            JoinGame_WorldNames_IsHard => on_game_join_worldnames_ishard,
                             JoinGame_WorldNames => on_game_join_worldnames,
                             JoinGame_HashedSeed_Respawn => on_game_join_hashedseed_respawn,
                             JoinGame_i32_ViewDistance => on_game_join_i32_viewdistance,
@@ -518,9 +591,11 @@ impl Server {
                             Respawn_Gamemode => on_respawn_gamemode,
                             Respawn_HashedSeed => on_respawn_hashedseed,
                             Respawn_WorldName => on_respawn_worldname,
+                            Respawn_NBT => on_respawn_nbt,
                             KeepAliveClientbound_i64 => on_keep_alive_i64,
                             KeepAliveClientbound_VarInt => on_keep_alive_varint,
                             KeepAliveClientbound_i32 => on_keep_alive_i32,
+                            ChunkData_Biomes3D_VarInt => on_chunk_data_biomes3d_varint,
                             ChunkData_Biomes3D_bool => on_chunk_data_biomes3d_bool,
                             ChunkData => on_chunk_data,
                             ChunkData_Biomes3D => on_chunk_data_biomes3d,
@@ -533,6 +608,7 @@ impl Server {
                             ChunkUnload => on_chunk_unload,
                             BlockChange_VarInt => on_block_change_varint,
                             BlockChange_u8 => on_block_change_u8,
+                            MultiBlockChange_Packed => on_multi_block_change_packed,
                             MultiBlockChange_VarInt => on_multi_block_change_varint,
                             MultiBlockChange_u16 => on_multi_block_change_u16,
                             TeleportPlayer_WithConfirm => on_teleport_player_withconfirm,
@@ -546,6 +622,9 @@ impl Server {
                             UpdateSign_u16 => on_sign_update_u16,
                             PlayerInfo => on_player_info,
                             PlayerInfo_String => on_player_info_string,
+                            ServerMessage_NoPosition => on_servermessage_noposition,
+                            ServerMessage_Position => on_servermessage_position,
+                            ServerMessage_Sender => on_servermessage_sender,
                             Disconnect => on_disconnect,
                             // Entities
                             EntityDestroy => on_entity_destroy,
@@ -718,7 +797,27 @@ impl Server {
                 renderer.view_vector.cast().unwrap(),
                 target::test_block,
             ) {
-                if self.protocol_version >= 315 {
+                if self.protocol_version >= 477 {
+                    self.write_packet(
+                        packet::play::serverbound::PlayerBlockPlacement_insideblock {
+                            location: pos,
+                            face: protocol::VarInt(match face {
+                                Direction::Down => 0,
+                                Direction::Up => 1,
+                                Direction::North => 2,
+                                Direction::South => 3,
+                                Direction::West => 4,
+                                Direction::East => 5,
+                                _ => unreachable!(),
+                            }),
+                            hand: protocol::VarInt(0),
+                            cursor_x: at.x as f32,
+                            cursor_y: at.y as f32,
+                            cursor_z: at.z as f32,
+                            inside_block: false,
+                        },
+                    );
+                } else if self.protocol_version >= 315 {
                     self.write_packet(packet::play::serverbound::PlayerBlockPlacement_f32 {
                         location: pos,
                         face: protocol::VarInt(match face {
@@ -941,33 +1040,24 @@ impl Server {
         }
     }
 
+    // TODO: remove wrappers and directly call on Conn
     fn write_fmlhs_plugin_message(&mut self, msg: &forge::FmlHs) {
-        use crate::protocol::Serializable;
-
-        let mut buf: Vec<u8> = vec![];
-        msg.write_to(&mut buf).unwrap();
-
-        self.write_plugin_message("FML|HS", &buf);
+        let _ = self.conn.as_mut().unwrap().write_fmlhs_plugin_message(msg); // TODO handle errors
     }
 
     fn write_plugin_message(&mut self, channel: &str, data: &[u8]) {
-        if protocol::is_network_debug() {
-            debug!(
-                "Sending plugin message: channel={}, data={:?}",
-                channel, data
-            );
-        }
-        if self.protocol_version >= 47 {
-            self.write_packet(packet::play::serverbound::PluginMessageServerbound {
-                channel: channel.to_string(),
-                data: data.to_vec(),
-            });
-        } else {
-            self.write_packet(packet::play::serverbound::PluginMessageServerbound_i16 {
-                channel: channel.to_string(),
-                data: crate::protocol::LenPrefixedBytes::<protocol::VarShort>::new(data.to_vec()),
-            });
-        }
+        let _ = self
+            .conn
+            .as_mut()
+            .unwrap()
+            .write_plugin_message(channel, data); // TODO handle errors
+    }
+
+    fn on_game_join_worldnames_ishard(
+        &mut self,
+        join: packet::play::clientbound::JoinGame_WorldNames_IsHard,
+    ) {
+        self.on_game_join(join.gamemode, join.entity_id)
     }
 
     fn on_game_join_worldnames(&mut self, join: packet::play::clientbound::JoinGame_WorldNames) {
@@ -1044,6 +1134,10 @@ impl Server {
     }
 
     fn on_respawn_worldname(&mut self, respawn: packet::play::clientbound::Respawn_WorldName) {
+        self.respawn(respawn.gamemode)
+    }
+
+    fn on_respawn_nbt(&mut self, respawn: packet::play::clientbound::Respawn_NBT) {
         self.respawn(respawn.gamemode)
     }
 
@@ -1381,6 +1475,18 @@ impl Server {
         &mut self,
         spawn: packet::play::clientbound::SpawnPlayer_i32_HeldItem_String,
     ) {
+        // 1.7.10: populate the player list here, since we only now know the UUID
+        let uuid = protocol::UUID::from_str(&spawn.uuid).unwrap();
+        self.players.entry(uuid.clone()).or_insert(PlayerInfo {
+            name: spawn.name.clone(),
+            uuid,
+            skin_url: None,
+
+            display_name: None,
+            ping: 0, // TODO: don't overwrite from PlayerInfo_String
+            gamemode: Gamemode::from_int(0),
+        });
+
         self.on_player_spawn(
             spawn.entity_id.0,
             protocol::UUID::from_str(&spawn.uuid).unwrap(),
@@ -1654,7 +1760,23 @@ impl Server {
         &mut self,
         _player_info: packet::play::clientbound::PlayerInfo_String,
     ) {
-        // TODO: support PlayerInfo_String for 1.7
+        // TODO: track online players, for 1.7.10 - this is for the <tab> online player list
+        // self.players in 1.7.10 will be only spawned players (within client range)
+        /*
+        if player_info.online {
+            self.players.entry(uuid.clone()).or_insert(PlayerInfo {
+                name: player_info.name.clone(),
+                uuid,
+                skin_url: None,
+
+                display_name: None,
+                ping: player_info.ping as i32,
+                gamemode: Gamemode::from_int(0),
+            });
+        } else {
+            self.players.remove(&uuid);
+        }
+        */
     }
 
     fn on_player_info(&mut self, player_info: packet::play::clientbound::PlayerInfo) {
@@ -1754,13 +1876,38 @@ impl Server {
         }
     }
 
+    fn on_servermessage_noposition(
+        &mut self,
+        m: packet::play::clientbound::ServerMessage_NoPosition,
+    ) {
+        self.on_servermessage(&m.message, None, None);
+    }
+
+    fn on_servermessage_position(&mut self, m: packet::play::clientbound::ServerMessage_Position) {
+        self.on_servermessage(&m.message, Some(m.position), None);
+    }
+
+    fn on_servermessage_sender(&mut self, m: packet::play::clientbound::ServerMessage_Sender) {
+        self.on_servermessage(&m.message, Some(m.position), Some(m.sender));
+    }
+
+    fn on_servermessage(
+        &mut self,
+        message: &format::Component,
+        _position: Option<u8>,
+        _sender: Option<protocol::UUID>,
+    ) {
+        info!("Received chat message: {}", message);
+        self.received_chat_at = Some(Instant::now());
+    }
+
     fn load_block_entities(&mut self, block_entities: Vec<Option<crate::nbt::NamedTag>>) {
-        for optional_block_entity in block_entities {
-            if let Some(block_entity) = optional_block_entity {
-                let x = block_entity.1.get("x").unwrap().as_int().unwrap();
-                let y = block_entity.1.get("y").unwrap().as_int().unwrap();
-                let z = block_entity.1.get("z").unwrap().as_int().unwrap();
-                let tile_id = block_entity.1.get("id").unwrap().as_str().unwrap();
+        for block_entity in block_entities.into_iter().flatten() {
+            let x = block_entity.1.get("x").unwrap().as_int().unwrap();
+            let y = block_entity.1.get("y").unwrap().as_int().unwrap();
+            let z = block_entity.1.get("z").unwrap().as_int().unwrap();
+            if let Some(tile_id) = block_entity.1.get("id") {
+                let tile_id = tile_id.as_str().unwrap();
                 let action;
                 match tile_id {
                     // Fake a sign update
@@ -1773,8 +1920,29 @@ impl Server {
                     action,
                     nbt: Some(block_entity.clone()),
                 });
+            } else {
+                warn!(
+                    "Block entity at ({},{},{}) missing id tag: {:?}",
+                    x, y, z, block_entity
+                );
             }
         }
+    }
+
+    fn on_chunk_data_biomes3d_varint(
+        &mut self,
+        chunk_data: packet::play::clientbound::ChunkData_Biomes3D_VarInt,
+    ) {
+        self.world
+            .load_chunk115(
+                chunk_data.chunk_x,
+                chunk_data.chunk_z,
+                chunk_data.new,
+                chunk_data.bitmask.0 as u16,
+                chunk_data.data.data,
+            )
+            .unwrap();
+        self.load_block_entities(chunk_data.block_entities.data);
     }
 
     fn on_chunk_data_biomes3d_bool(
@@ -1912,11 +2080,9 @@ impl Server {
     fn on_block_change(&mut self, location: Position, id: i32) {
         self.world.set_block(
             location,
-            block::Block::by_vanilla_id(
-                id as usize,
-                self.protocol_version,
-                &self.world.modded_block_ids,
-            ),
+            self.world
+                .id_map
+                .by_vanilla_id(id as usize, &self.world.modded_block_ids),
         )
     }
 
@@ -1934,6 +2100,29 @@ impl Server {
         );
     }
 
+    fn on_multi_block_change_packed(
+        &mut self,
+        block_change: packet::play::clientbound::MultiBlockChange_Packed,
+    ) {
+        let sx = (block_change.chunk_section_pos >> 42) as i32;
+        let sy = ((block_change.chunk_section_pos << 44) >> 44) as i32;
+        let sz = ((block_change.chunk_section_pos << 22) >> 42) as i32;
+
+        for record in block_change.records.data {
+            let block_raw_id = record.0 >> 12;
+            let lz = (record.0 & 0xf) as i32;
+            let ly = ((record.0 >> 4) & 0xf) as i32;
+            let lx = ((record.0 >> 8) & 0xf) as i32;
+
+            self.world.set_block(
+                Position::new(sx + lx as i32, sy + ly as i32, sz + lz as i32),
+                self.world
+                    .id_map
+                    .by_vanilla_id(block_raw_id as usize, &self.world.modded_block_ids),
+            );
+        }
+    }
+
     fn on_multi_block_change_varint(
         &mut self,
         block_change: packet::play::clientbound::MultiBlockChange_VarInt,
@@ -1947,11 +2136,9 @@ impl Server {
                     record.y as i32,
                     oz + (record.xz & 0xF) as i32,
                 ),
-                block::Block::by_vanilla_id(
-                    record.block_id.0 as usize,
-                    self.protocol_version,
-                    &self.world.modded_block_ids,
-                ),
+                self.world
+                    .id_map
+                    .by_vanilla_id(record.block_id.0 as usize, &self.world.modded_block_ids),
             );
         }
     }
@@ -1977,11 +2164,9 @@ impl Server {
 
             self.world.set_block(
                 Position::new(x, y, z),
-                block::Block::by_vanilla_id(
-                    id as usize,
-                    self.protocol_version,
-                    &self.world.modded_block_ids,
-                ),
+                self.world
+                    .id_map
+                    .by_vanilla_id(id as usize, &self.world.modded_block_ids),
             );
         }
     }

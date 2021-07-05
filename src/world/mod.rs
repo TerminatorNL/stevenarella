@@ -46,6 +46,7 @@ pub struct World {
 
     protocol_version: i32,
     pub modded_block_ids: HashMap<usize, String>,
+    pub id_map: block::VanillaIDMap,
 }
 
 #[derive(Clone, Debug)]
@@ -91,8 +92,10 @@ struct LightUpdate {
 
 impl World {
     pub fn new(protocol_version: i32) -> World {
+        let id_map = block::VanillaIDMap::new(protocol_version);
         World {
             protocol_version,
+            id_map,
             ..Default::default()
         }
     }
@@ -206,7 +209,7 @@ impl World {
 
     #[allow(clippy::verbose_bit_mask)] // "llvm generates better code" for updates_performed & 0xFFF "on x86"
     pub fn tick(&mut self, m: &mut ecs::Manager) {
-        use std::time::Instant;
+        use instant::Instant;
         let start = Instant::now();
         let mut updates_performed = 0;
         while !self.light_updates.is_empty() {
@@ -430,7 +433,7 @@ impl World {
         y: i32,
         z: i32,
     ) -> Option<(Option<&mut Section>, &mut u32)> {
-        if y < 0 || y > 15 {
+        if !(0..=15).contains(&y) {
             return None;
         }
         if let Some(chunk) = self.chunks.get_mut(&CPos(x, z)) {
@@ -540,7 +543,7 @@ impl World {
                 let z2 = min(16, max(0, z + d - (cz << 4)));
 
                 for cy in cy1..cy2 {
-                    if cy < 0 || cy > 15 {
+                    if !(0..=15).contains(&cy) {
                         continue;
                     }
                     let section = &chunk.sections[cy as usize];
@@ -658,15 +661,12 @@ impl World {
 
         let cpos = CPos(x, z);
         {
-            let chunk = if new {
+            if new {
                 self.chunks.insert(cpos, Chunk::new(cpos));
-                self.chunks.get_mut(&cpos).unwrap()
-            } else {
-                if !self.chunks.contains_key(&cpos) {
-                    return Ok(());
-                }
-                self.chunks.get_mut(&cpos).unwrap()
-            };
+            } else if !self.chunks.contains_key(&cpos) {
+                return Ok(());
+            }
+            let chunk = self.chunks.get_mut(&cpos).unwrap();
 
             for i in 0..16 {
                 if chunk.sections[i].is_none() {
@@ -686,11 +686,8 @@ impl World {
                     let id = data.read_u16::<byteorder::LittleEndian>()?;
                     section.blocks.set(
                         bi,
-                        block::Block::by_vanilla_id(
-                            id as usize,
-                            self.protocol_version,
-                            &self.modded_block_ids,
-                        ),
+                        self.id_map
+                            .by_vanilla_id(id as usize, &self.modded_block_ids),
                     );
 
                     // Spawn block entities
@@ -816,15 +813,12 @@ impl World {
     ) -> Result<(), protocol::Error> {
         let cpos = CPos(x, z);
         {
-            let chunk = if new {
+            if new {
                 self.chunks.insert(cpos, Chunk::new(cpos));
-                self.chunks.get_mut(&cpos).unwrap()
-            } else {
-                if !self.chunks.contains_key(&cpos) {
-                    return Ok(());
-                }
-                self.chunks.get_mut(&cpos).unwrap()
-            };
+            } else if !self.chunks.contains_key(&cpos) {
+                return Ok(());
+            }
+            let chunk = self.chunks.get_mut(&cpos).unwrap();
 
             // Block type array - whole byte per block
             let mut block_types = [[0u8; 4096]; 16];
@@ -938,11 +932,8 @@ impl World {
                         | (block_meta[i].get(bi) as u16);
                     section.blocks.set(
                         bi,
-                        block::Block::by_vanilla_id(
-                            id as usize,
-                            self.protocol_version,
-                            &self.modded_block_ids,
-                        ),
+                        self.id_map
+                            .by_vanilla_id(id as usize, &self.modded_block_ids),
                     );
 
                     // Spawn block entities
@@ -1018,15 +1009,12 @@ impl World {
 
         let cpos = CPos(x, z);
         {
-            let chunk = if new {
+            if new {
                 self.chunks.insert(cpos, Chunk::new(cpos));
-                self.chunks.get_mut(&cpos).unwrap()
-            } else {
-                if !self.chunks.contains_key(&cpos) {
-                    return Ok(());
-                }
-                self.chunks.get_mut(&cpos).unwrap()
-            };
+            } else if !self.chunks.contains_key(&cpos) {
+                return Ok(());
+            }
+            let chunk = self.chunks.get_mut(&cpos).unwrap();
 
             for i in 0..16 {
                 if chunk.sections[i].is_none() {
@@ -1056,17 +1044,16 @@ impl World {
                     let count = VarInt::read_from(&mut data)?.0;
                     for i in 0..count {
                         let id = VarInt::read_from(&mut data)?.0;
-                        let bl = block::Block::by_vanilla_id(
-                            id as usize,
-                            self.protocol_version,
-                            &self.modded_block_ids,
-                        );
+                        let bl = self
+                            .id_map
+                            .by_vanilla_id(id as usize, &self.modded_block_ids);
                         mappings.insert(i as usize, bl);
                     }
                 }
 
                 let bits = LenPrefixed::<VarInt, u64>::read_from(&mut data)?.data;
-                let m = bit::Map::from_raw(bits, bit_size as usize);
+                let padded = self.protocol_version >= 736;
+                let m = bit::Map::from_raw(bits, bit_size as usize, padded);
 
                 for bi in 0..4096 {
                     let id = m.get(bi);
@@ -1076,11 +1063,7 @@ impl World {
                             .get(&id)
                             .cloned()
                             // TODO: fix or_fun_call, but do not re-borrow self
-                            .unwrap_or(block::Block::by_vanilla_id(
-                                id,
-                                self.protocol_version,
-                                &self.modded_block_ids,
-                            )),
+                            .unwrap_or(self.id_map.by_vanilla_id(id, &self.modded_block_ids)),
                     );
                     // Spawn block entities
                     let b = section.blocks.get(bi);
@@ -1123,7 +1106,7 @@ impl World {
     }
 
     fn flag_section_dirty(&mut self, x: i32, y: i32, z: i32) {
-        if y < 0 || y > 15 {
+        if !(0..=15).contains(&y) {
             return;
         }
         let cpos = CPos(x, z);
@@ -1254,7 +1237,7 @@ impl Chunk {
 
     fn set_block(&mut self, x: i32, y: i32, z: i32, b: block::Block) -> bool {
         let s_idx = y >> 4;
-        if s_idx < 0 || s_idx > 15 {
+        if !(0..=15).contains(&s_idx) {
             return false;
         }
         let s_idx = s_idx as usize;
@@ -1296,7 +1279,7 @@ impl Chunk {
 
     fn get_block(&self, x: i32, y: i32, z: i32) -> block::Block {
         let s_idx = y >> 4;
-        if s_idx < 0 || s_idx > 15 {
+        if !(0..=15).contains(&s_idx) {
             return block::Missing {};
         }
         match self.sections[s_idx as usize].as_ref() {
@@ -1307,7 +1290,7 @@ impl Chunk {
 
     fn get_block_light(&self, x: i32, y: i32, z: i32) -> u8 {
         let s_idx = y >> 4;
-        if s_idx < 0 || s_idx > 15 {
+        if !(0..=15).contains(&s_idx) {
             return 0;
         }
         match self.sections[s_idx as usize].as_ref() {
@@ -1318,7 +1301,7 @@ impl Chunk {
 
     fn set_block_light(&mut self, x: i32, y: i32, z: i32, light: u8) {
         let s_idx = y >> 4;
-        if s_idx < 0 || s_idx > 15 {
+        if !(0..=15).contains(&s_idx) {
             return;
         }
         let s_idx = s_idx as usize;
@@ -1336,7 +1319,7 @@ impl Chunk {
 
     fn get_sky_light(&self, x: i32, y: i32, z: i32) -> u8 {
         let s_idx = y >> 4;
-        if s_idx < 0 || s_idx > 15 {
+        if !(0..=15).contains(&s_idx) {
             return 15;
         }
         match self.sections[s_idx as usize].as_ref() {
@@ -1347,7 +1330,7 @@ impl Chunk {
 
     fn set_sky_light(&mut self, x: i32, y: i32, z: i32, light: u8) {
         let s_idx = y >> 4;
-        if s_idx < 0 || s_idx > 15 {
+        if !(0..=15).contains(&s_idx) {
             return;
         }
         let s_idx = s_idx as usize;
