@@ -141,7 +141,7 @@ macro_rules! state_packets {
                     impl PacketType for $name {
 
                         fn packet_id(&self, version: i32) -> i32 {
-                            packet::versions::translate_internal_packet_id_for_version(version, State::$stateName, Direction::$dirName, internal_ids::$name, false)
+                            packet::versions::translate_internal_packet_id_for_version(version, State::$stateName, Direction::$dirName, internal_ids::$name, false).unwrap_or_else(|| unreachable!())
                         }
 
                         fn write<W: io::Write>(&self, buf: &mut W) -> Result<(), Error> {
@@ -169,21 +169,24 @@ macro_rules! state_packets {
                         match dir {
                             $(
                                 Direction::$dirName => {
-                                    let internal_id = packet::versions::translate_internal_packet_id_for_version(version, state, dir, id, true);
-                                    match internal_id {
-                                    $(
-                                        self::$state::$dir::internal_ids::$name => {
-                                            use self::$state::$dir::$name;
-                                            let mut packet : Box<$name> = Box::new($name::default());
-                                            $(
-                                                if true $(&& ($cond(&packet)))* {
-                                                    packet.$field = Serializable::read_from(&mut buf)?;
-                                                }
-                                            )+
-                                            Result::Ok(Option::Some(Packet::$name(packet)))
-                                        },
-                                    )*
-                                        _ => Result::Ok(Option::None)
+                                    if let Some(internal_id) = packet::versions::translate_internal_packet_id_for_version(version, state, dir, id, true){
+                                        match internal_id {
+                                        $(
+                                            self::$state::$dir::internal_ids::$name => {
+                                                use self::$state::$dir::$name;
+                                                let mut packet : Box<$name> = Box::new($name::default());
+                                                $(
+                                                    if true $(&& ($cond(&packet)))* {
+                                                        packet.$field = Serializable::read_from(&mut buf)?;
+                                                    }
+                                                )+
+                                                Result::Ok(Option::Some(Packet::$name(packet)))
+                                            },
+                                        )*
+                                            _ => Result::Ok(Option::None)
+                                        }
+                                    }else{
+                                        Result::Err(Error::Err("Failed to translate packet ID".to_string()))
                                     }
                                 }
                             )+
@@ -207,7 +210,7 @@ macro_rules! protocol_packet_ids {
     })+) => {
         use crate::protocol::*;
 
-        pub fn translate_internal_packet_id(state: State, dir: Direction, id: i32, to_internal: bool) -> i32 {
+        pub fn translate_internal_packet_id(state: State, dir: Direction, id: i32, to_internal: bool) -> Option<i32> {
             match state {
                 $(
                     State::$stateName => {
@@ -217,16 +220,16 @@ macro_rules! protocol_packet_ids {
                                     if to_internal {
                                         match id {
                                         $(
-                                            $id => crate::protocol::packet::$state::$dir::internal_ids::$name,
+                                            $id => Some(crate::protocol::packet::$state::$dir::internal_ids::$name),
                                         )*
-                                            _ => panic!("bad packet id 0x{:x} in {:?} {:?}", id, dir, state),
+                                            _ => None,
                                         }
                                     } else {
                                         match id {
                                         $(
-                                            crate::protocol::packet::$state::$dir::internal_ids::$name => $id,
+                                            crate::protocol::packet::$state::$dir::internal_ids::$name => Some($id),
                                         )*
-                                            _ => panic!("bad packet internal id 0x{:x} in {:?} {:?}", id, dir, state),
+                                            _ => None,
                                         }
                                     }
                                 }

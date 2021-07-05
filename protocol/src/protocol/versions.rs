@@ -69,7 +69,7 @@ pub fn translate_internal_packet_id_for_version(
     dir: Direction,
     id: i32,
     to_internal: bool,
-) -> i32 {
+) -> Option<i32> {
     match version {
         755 => v1_17::translate_internal_packet_id(state, dir, id, to_internal),
         754 | 753 | 751 => v1_16_4::translate_internal_packet_id(state, dir, id, to_internal),
