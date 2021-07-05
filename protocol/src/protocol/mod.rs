@@ -80,33 +80,31 @@ macro_rules! state_packets {
         $(
             $(
                 $(
-        $name($state::$dir::$name),
+        $name(Box<$state::$dir::$name>),
                 )*
             )+
         )+
         }
 
         impl PacketType for Packet {
-            #[inline]
             fn packet_id(&self, version: i32) -> i32 {
                 match self {
                     $(
                         $(
                             $(
-                                Self::$name(v) => PacketType::packet_id(v, version),
+                                Self::$name(v) => PacketType::packet_id(v.as_ref(), version),
                             )*
                         )+
                     )+
                 }
             }
 
-            #[inline]
             fn write<W: io::Write>(&self, buf: &mut W) -> Result<(), Error> {
                 match self {
                     $(
                         $(
                             $(
-                                Self::$name(v) => PacketType::write(v, buf),
+                                Self::$name(v) => PacketType::write(v.as_ref(), buf),
                             )*
                         )+
                     )+
@@ -176,7 +174,7 @@ macro_rules! state_packets {
                                     $(
                                         self::$state::$dir::internal_ids::$name => {
                                             use self::$state::$dir::$name;
-                                            let mut packet : $name = $name::default();
+                                            let mut packet : Box<$name> = Box::new($name::default());
                                             $(
                                                 if true $(&& ($cond(&packet)))* {
                                                     packet.$field = Serializable::read_from(&mut buf)?;
