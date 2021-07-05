@@ -346,6 +346,9 @@ state_packets!(
                 field jump: bool =,
                 field unmount: bool =,
             }
+            packet PlayPong {
+                field id: i32 =,
+            }
             /// CraftingBookData is sent when the player interacts with the crafting book.
             packet CraftingBookData {
                 field action: VarInt =,
@@ -776,7 +779,12 @@ state_packets!(
                 field current_item: u16 =,
                 field metadata: types::Metadata =,
             }
-
+            packet SculkVibrationSignal {
+                field source: Position =,
+                field destination_id: String =,
+                field destination_pos: Option<Position> = when(|_: &SculkVibrationSignal| unimplemented!("Not enough info to tell if Position or VarInt with entity ID")),
+                field arrival_ticks: VarInt =,
+            }
             /// Animation is sent by the server to play an animation on a specific entity.
             packet Animation {
                 field entity_id: VarInt =,
@@ -890,6 +898,13 @@ state_packets!(
             packet ServerMessage_NoPosition {
                 field message: format::Component =,
             }
+            // Clear the client's current title information
+            packet ClearTitles {
+                field reset: bool =,
+            }
+            packet ActionBar {
+                field message: format::Component =,
+            }
             /// MultiBlockChange is used to update a batch of blocks in a single packet.
             packet MultiBlockChange_Packed {
                 field chunk_section_pos: u64 =,
@@ -934,6 +949,16 @@ state_packets!(
                 field window_id: u8 =,
                 field number_of_slots: VarInt =,
                 field entity_id: i32 =,
+            }
+            packet InitializeWorldBorder{
+                field x: f64 =,
+                field z: f64 =,
+                field old_diameter: f64 =,
+                field new_diameter: f64 =,
+                field speed: VarLong =,
+                field portal_tp_boundary: VarInt =,
+                field warning_blocks: VarInt =,
+                field warning_time: VarInt =,
             }
             packet WindowOpen_u8 {
                 field id: u8 =,
@@ -1519,6 +1544,9 @@ state_packets!(
                 field y: i32 =,
                 field z: i32 =,
             }
+            packet PlayPing {
+                field id: i32 =,
+            }
             /// CraftRecipeResponse is a response to CraftRecipeRequest, notifies the UI.
             packet CraftRecipeResponse {
                 field window_id: u8 =,
@@ -1539,6 +1567,14 @@ state_packets!(
                 field player_id: Option<VarInt> = when(|p: &CombatEvent| p.event.0 == 2),
                 field entity_id: Option<i32> = when(|p: &CombatEvent| p.event.0 == 1 || p.event.0 == 2),
                 field message: Option<format::Component> = when(|p: &CombatEvent| p.event.0 == 2),
+            }
+            packet EnterCombatEvent {
+                field empty: () =,
+            }
+            packet DeathCombatEvent {
+                field player_id: VarInt =,
+                field killer_id: i32 =,
+                field message: format::Component =,
             }
             /// PlayerInfo is sent by the server for every player connected to the server
             /// to provide skin and username information as well as ping and gamemode info.
@@ -1718,6 +1754,24 @@ state_packets!(
                 field warning_time: Option<VarInt> = when(|p: &WorldBorder| p.action.0 == 3 || p.action.0 == 4),
                 field warning_blocks: Option<VarInt> = when(|p: &WorldBorder| p.action.0 == 3 || p.action.0 == 5),
             }
+            packet WorldBorderCenter {
+                field x: f64 =,
+                field z: f64 =,
+            }
+            packet WorldBorderLerpSize {
+                field old_diameter: f64 =,
+                field new_diameter: f64 =,
+                field speed: VarLong =,
+            }
+            packet WorldBorderSize {
+                field diameter: f64 =,
+            }
+            packet WorldBorderWarningDelay {
+                field warning_time: VarInt =,
+            }
+            packet WorldBorderWarningReach {
+                field warning_blocks: VarInt =,
+            }
             /// Camera causes the client to spectate the entity with the passed id.
             /// Use the player's id to de-spectate.
             packet Camera {
@@ -1884,6 +1938,14 @@ state_packets!(
                 field action: u8 =,
                 field object_name: String =,
                 field value: Option<i32 > = when(|p: &UpdateScore_i32| p.action != 1),
+            }
+            packet SetTitleSubtitle {
+                field subtitle: format::Component =,
+            }
+            packet SetTitleTimes {
+                field fade_in: i32 =,
+                field stay: i32 =,
+                field fade_out: i32 =,
             }
             /// SpawnPosition is sent to change the player's current spawn point. Currently
             /// only used by the client for the compass.
