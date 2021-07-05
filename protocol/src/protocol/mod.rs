@@ -87,7 +87,7 @@ macro_rules! state_packets {
         }
 
         impl PacketType for Packet {
-
+            #[inline]
             fn packet_id(&self, version: i32) -> i32 {
                 match self {
                     $(
@@ -100,6 +100,7 @@ macro_rules! state_packets {
                 }
             }
 
+            #[inline]
             fn write<W: io::Write>(&self, buf: &mut W) -> Result<(), Error> {
                 match self {
                     $(
