@@ -94,7 +94,42 @@ impl Component {
     }
 
     pub fn to_value(&self) -> serde_json::Value {
-        unimplemented!()
+        match self {
+            Component::Text(text) => {
+                let mut map = serde_json::Map::new();
+                map.insert("text".to_string(), serde_json::Value::String(text.text.clone()));
+                if let Some(bold) = text.modifier.bold{
+                    map.insert("bold".to_string(), serde_json::Value::String(bold.to_string()));
+                }
+                if let Some(color) = text.modifier.color{
+                    map.insert("color".to_string(), serde_json::Value::String(color.to_string()));
+                }
+                if let Some(italic) = text.modifier.italic{
+                    map.insert("italic".to_string(), serde_json::Value::String(italic.to_string()));
+                }
+                if let Some(obfuscated) = text.modifier.obfuscated{
+                    map.insert("obfuscated".to_string(), serde_json::Value::String(obfuscated.to_string()));
+                }
+                if let Some(strikethrough) = text.modifier.strikethrough{
+                    map.insert("strikethrough".to_string(), serde_json::Value::String(strikethrough.to_string()));
+                }
+                if let Some(underlined) = text.modifier.underlined{
+                    map.insert("underlined".to_string(), serde_json::Value::String(underlined.to_string()));
+                }
+                if let Some(extras) = &text.modifier.extra{
+                    let mut extra: Vec<serde_json::Map<String, serde_json::Value>> = Vec::new();
+                    for elem in extras{
+                        if let serde_json::Value::Object(map) = elem.to_value(){
+                            extra.push(map);
+                        }else{
+                            unreachable!("Expected object at this stage");
+                        }
+                    }
+                    map.insert("extra".to_string(), serde_json::Value::String(text.text.clone()));
+                }
+                serde_json::Value::Object(map)
+            }
+        }
     }
 }
 
