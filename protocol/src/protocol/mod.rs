@@ -141,7 +141,7 @@ macro_rules! state_packets {
                     impl PacketType for $name {
 
                         fn packet_id(&self, version: i32) -> i32 {
-                            packet::versions::translate_internal_packet_id_for_version(version, State::$stateName, Direction::$dirName, internal_ids::$name, false).unwrap_or_else(|| unreachable!())
+                            packet::versions::translate_internal_packet_id_for_version(version, State::$stateName, Direction::$dirName, internal_ids::$name, false).unwrap_or_else(|| panic!("Could not resolve packet ID in protocol {} for {:?}",version, self))
                         }
 
                         fn write<W: io::Write>(&self, buf: &mut W) -> Result<(), Error> {
