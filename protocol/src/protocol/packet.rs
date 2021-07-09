@@ -1085,6 +1085,15 @@ state_packets!(
             packet KeepAliveClientbound_i32 {
                 field id: i32 =,
             }
+            packet ChunkData_Biomes3D_BitMask {
+                field chunk_x: i32 =,
+                field chunk_z: i32 =,
+                field bitmask: LenPrefixed<VarInt, VarLong> =,
+                field heightmaps: Option<nbt::NamedTag> =,
+                field biomes: LenPrefixed<VarInt, VarInt> =,
+                field data: LenPrefixedBytes<VarInt> =,
+                field block_entities: LenPrefixed<VarInt, Option<nbt::NamedTag>> =,
+            }
             /// ChunkData sends or updates a single chunk on the client. If New is set
             /// then biome data should be sent too.
             packet ChunkData_Biomes3D_VarInt {
@@ -2157,6 +2166,16 @@ state_packets!(
                 field block: VarInt =,
                 field status: VarInt =,
                 field successful: bool =,
+            }
+            packet UpdateLight_Arrays {
+                field chunk_x: VarInt =,
+                field chunk_z: VarInt =,
+                field trust_edges: bool =,
+                field sky_light_mask: LenPrefixed<VarInt, VarLong> =,
+                field block_light_mask: LenPrefixed<VarInt, VarLong> =,
+                field empty_sky_light_mask: LenPrefixed<VarInt, VarLong> =,
+                field sky_light: LenPrefixed<VarInt, LenPrefixed<VarInt,u8>> =,
+                field light_array: LenPrefixed<VarInt, LenPrefixed<VarInt,u8>> =,
             }
             packet UpdateLight_WithTrust {
                 field chunk_x: VarInt =,

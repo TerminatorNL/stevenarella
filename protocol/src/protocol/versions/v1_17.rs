@@ -92,10 +92,10 @@ protocol_packet_ids!(
             0x1f => WindowOpenHorse
             0x20 => InitializeWorldBorder
             0x21 => KeepAliveClientbound_i64
-            0x22 => ChunkData_Biomes3D_VarInt
+            0x22 => ChunkData_Biomes3D_BitMask
             0x23 => Effect
             0x24 => Particle_f64
-            0x25 => UpdateLight_WithTrust
+            0x25 => UpdateLight_Arrays
             0x26 => JoinGame_WorldNames_IsHard
             0x27 => Maps
             0x28 => TradeList_WithRestock
