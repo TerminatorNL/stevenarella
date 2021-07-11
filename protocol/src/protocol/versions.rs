@@ -27,6 +27,7 @@ mod v1_9_2;
 pub fn protocol_name_to_protocol_version(s: String) -> i32 {
     match s.as_ref() {
         "" => SUPPORTED_PROTOCOLS[0],
+        "1.17.1" => 756,
         "1.17" => 755,
         "1.16.5" => 754,
         "1.16.4" => 754,
@@ -71,6 +72,7 @@ pub fn translate_internal_packet_id_for_version(
     to_internal: bool,
 ) -> Option<i32> {
     match version {
+        756 => unimplemented!(), //Not compatible with 1.17
         755 => v1_17::translate_internal_packet_id(state, dir, id, to_internal),
         754 | 753 | 751 => v1_16_4::translate_internal_packet_id(state, dir, id, to_internal),
         736 => v1_16_1::translate_internal_packet_id(state, dir, id, to_internal),

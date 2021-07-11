@@ -39,8 +39,8 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
-pub const SUPPORTED_PROTOCOLS: [i32; 25] = [
-    755, 754, 753, 751, 736, 735, 578, 575, 498, 490, 485, 480, 477, 452, 451, 404, 340, 316, 315, 210,
+pub const SUPPORTED_PROTOCOLS: [i32; 26] = [
+    756, 755, 754, 753, 751, 736, 735, 578, 575, 498, 490, 485, 480, 477, 452, 451, 404, 340, 316, 315, 210,
     109, 107, 74, 47, 5,
 ];
 
@@ -328,6 +328,22 @@ impl Serializable for format::Component {
     }
     fn write_to<W: io::Write>(&self, buf: &mut W) -> Result<(), Error> {
         let val = serde_json::to_string(&self.to_value()).unwrap();
+        let bytes = val.as_bytes();
+        VarInt(bytes.len() as i32).write_to(buf)?;
+        buf.write_all(bytes)?;
+        Result::Ok(())
+    }
+}
+
+impl Serializable for serde_json::Value {
+    fn read_from<R: io::Read>(buf: &mut R) -> Result<Self, Error> {
+        let len = VarInt::read_from(buf)?.0;
+        let mut bytes = Vec::<u8>::new();
+        buf.take(len as u64).read_to_end(&mut bytes)?;
+        Result::Ok(serde_json::from_slice(&bytes)?)
+    }
+    fn write_to<W: io::Write>(&self, buf: &mut W) -> Result<(), Error> {
+        let val = serde_json::to_string(&self)?;
         let bytes = val.as_bytes();
         VarInt(bytes.len() as i32).write_to(buf)?;
         buf.write_all(bytes)?;

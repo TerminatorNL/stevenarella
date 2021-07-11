@@ -885,7 +885,7 @@ state_packets!(
             /// or just a system message. The Type field controls the location the
             /// message is displayed at and when the message is displayed.
             packet ServerMessage_Sender {
-                field message: format::Component =,
+                field message: serde_json::Value =,
                 /// 0 - Chat message, 1 - System message, 2 - Action bar message
                 field position: u8 =,
                 field sender: UUID =,
@@ -2171,9 +2171,10 @@ state_packets!(
                 field chunk_x: VarInt =,
                 field chunk_z: VarInt =,
                 field trust_edges: bool =,
-                field sky_light_mask: LenPrefixed<VarInt, VarLong> =,
-                field block_light_mask: LenPrefixed<VarInt, VarLong> =,
-                field empty_sky_light_mask: LenPrefixed<VarInt, VarLong> =,
+                field sky_light_mask: LenPrefixed<VarInt, i64> =,
+                field block_light_mask: LenPrefixed<VarInt, i64> =,
+                field empty_sky_light_mask: LenPrefixed<VarInt, i64> =,
+                field empty_block_light_mask: LenPrefixed<VarInt, i64> =,
                 field sky_light: LenPrefixed<VarInt, LenPrefixed<VarInt,u8>> =,
                 field light_array: LenPrefixed<VarInt, LenPrefixed<VarInt,u8>> =,
             }
